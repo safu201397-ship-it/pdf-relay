@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>網頁版 PDF 電子簽章工具 (大合體)</title>
+    
+    <!-- 引入 Google Fonts 提升質感 -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- 引入 PDF 核心套件 (CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    
+    <!-- 引入微軟身分驗證套件 (MSAL.js) -->
+    <script src="https://alcdn.msauth.net/browser/2.37.1/js/msal-browser.min.js"></script>
+    
+    <style>
+        :root {
+            --primary: #4F46E5;
+            --primary-hover: #4338CA;
+            --success: #10B981;
+            --success-hover: #059669;
+            --danger: #EF4444;
+            --danger-hover: #DC2626;
+            --bg-color: #F3F4F6;
+            --card-bg: #FFFFFF;
+            --text-main: #111827;
+            --text-muted: #6B7280;
+            --border: #E5E7EB;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin: 0 0 8px 0;
+            letter-spacing: -0.025em;
+        }
+        
+        .header p { color: var(--text-muted); margin: 0; }
+
+        /* 雙欄排版設定 */
+        .container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 24px;
+            max-width: 1200px;
+            width: 100%;
+            align-items: start;
+        }
+
+        /* 左側控制面板 & 右側預覽面板 */
+        .panel {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+            border: 1px solid var(--border);
+        }
+
+        .step-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-main);
+        }
+
+        .step-title span {
+            background: var(--primary);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85rem;
+        }
+
+        /* 上傳區塊 UI */
+        .upload-area {
+            display: block;
+            border: 2px dashed var(--border);
+            border-radius: 10px;
+            padding: 24px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 24px;
+            background-color: #F9FAFB;
+        }
+        .upload-area:hover { border-color: var(--primary); background-color: #F3F4F6; }
+        .upload-area input { display: none; }
+        .upload-icon { font-size: 2rem; margin-bottom: 8px; display: block; }
+        .file-name-display { font-size: 0.85rem; color: var(--success); font-weight: 500; margin-top: 10px; word-break: break-all; }
+
+        /* 簽名板 UI */
+        .sig-container {
+            background-image: 
+                linear-gradient(45deg, #F3F4F6 25%, transparent 25%, transparent 75%, #F3F4F6 75%, #F3F4F6), 
+                linear-gradient(45deg, #F3F4F6 25%, transparent 25%, transparent 75%, #F3F4F6 75%, #F3F4F6);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        #signatureCanvas {
+            display: block;
+            width: 100%;
+            height: 160px;
+            touch-action: none;
+            cursor: crosshair;
+        }
+
+        /* 按鈕群組 */
+        .btn-group { display: flex; gap: 10px; margin-bottom: 24px;}
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-primary { background-color: var(--primary); color: white; }
+        .btn-primary:hover:not(:disabled) { background-color: var(--primary-hover); transform: translateY(-1px); }
+        .btn-success { background-color: var(--success); color: white; }
+        .btn-success:hover:not(:disabled) { background-color: var(--success-hover); transform: translateY(-1px); }
+        .btn-danger { background-color: var(--danger); color: white; }
+        .btn-danger:hover:not(:disabled) { background-color: var(--danger-hover); }
+        button:disabled { background-color: #D1D5DB; cursor: not-allowed; color: #9CA3AF; transform: none; }
+
+        /* 合成按鈕區塊 */
+        .synthesize-section {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--border);
+        }
+
+        /* PDF 預覽區塊 */
+        .pdf-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            background: #F9FAFB;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+        .pdf-toolbar button { width: auto; padding: 6px 16px; font-size: 0.9rem; }
+        #pageInfo { font-weight: 600; color: var(--text-main); font-size: 0.95rem; }
+
+        .workspace-wrapper {
+            background: #E5E7EB;
+            padding: 24px;
+            border-radius: 10px;
+            overflow: auto; /* 允許滾動查看大圖 */
+            display: flex;
+            justify-content: center;
+            min-height: 500px;
+            border: inset 1px rgba(0,0,0,0.05);
+        }
+
+        #pdfWorkspace {
+            position: relative;
+            display: inline-block;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            background-color: white;
+        }
+
+        canvas#pdfCanvas { display: block; }
+
+        /* 拖曳中的簽名圖層 */
+        .draggable-sig {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            cursor: grab;
+            border: 2px solid var(--primary);
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            user-select: none;
+            display: none;
+            touch-action: none;
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            width: 150px; /* 固定預設大小，可依需求調整 */
+            object-fit: contain;
+        }
+        .draggable-sig:active { cursor: grabbing; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.2); transform: scale(1.02); }
+
+        /* 響應式：螢幕變小時自動轉為上下排列 */
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+        }
+
+        /* 登入遮罩 */
+        .login-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(243, 244, 246, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        .login-overlay h2 { margin-bottom: 10px; color: var(--text-main); font-size: 2rem;}
+        .login-btn {
+            background-color: #2F2F2F;
+            color: white;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        .login-btn:hover { background-color: #000; }
+        
+        /* 隱藏主容器直到登入 */
+        .header, .container { display: none; }
+    </style>
+</head>
+<body>
+
+    <!-- 登入遮罩區塊 -->
+    <div id="loginOverlay" class="login-overlay">
+        <h2>🔒 企業級安全驗證</h2>
+        <p style="margin-bottom: 30px; color: var(--text-muted); font-size: 1.1rem;">本系統僅限公司內部員工使用，請先登入您的微軟帳號。</p>
+        <button id="msLoginBtn" class="login-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 21 21"><path fill="#f35325" d="M0 0h10v10H0z"/><path fill="#81bc06" d="M11 0h10v10H11z"/><path fill="#05a6f0" d="M0 11h10v10H0z"/><path fill="#ffba08" d="M11 11h10v10H11z"/></svg>
+            使用微軟帳號登入
+        </button>
+    </div>
+
+    <div class="header">
+        <h1>PDF 電子簽章工具</h1>
+        <p>全程在瀏覽器端處理，您的檔案絕對安全，不會上傳至任何伺服器。</p>
+    </div>
+
+    <div class="container">
+        <!-- 左側面板：控制區 -->
+        <div class="panel">
+            
+            <h3 class="step-title"><span>1</span> 上傳文件</h3>
+            <label class="upload-area" id="dropZone">
+                <span class="upload-icon">📄</span>
+                <span style="color: var(--primary); font-weight: 500;">點擊選擇</span> 或將 PDF 拖曳至此
+                <input type="file" id="pdfUpload" accept="application/pdf">
+                <div id="fileNameDisplay" class="file-name-display"></div>
+            </label>
+
+            <h3 class="step-title"><span>2</span> 繪製簽名</h3>
+            <div class="sig-container">
+                <canvas id="signatureCanvas" width="400" height="200"></canvas>
+            </div>
+            <div class="btn-group">
+                <button id="clearSigBtn" class="btn-danger">清除</button>
+                <label class="btn-success" style="cursor: pointer; margin: 0; display: inline-flex; justify-content: center; align-items: center; width: 100%; border-radius: 8px; font-size: 0.95rem; font-weight: 500; padding: 10px 16px;">
+                    圖章 (PNG/JPG)
+                    <input type="file" id="stampUpload" accept="image/png, image/jpeg" style="display: none;">
+                </label>
+                <button id="applySigBtn" class="btn-primary" disabled>套用畫筆</button>
+            </div>
+
+            <div class="synthesize-section">
+                <h3 class="step-title"><span>3</span> 合成與下載</h3>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 15px; text-align: left;">
+                    請在右側預覽畫面中，將簽名拖曳至您想要的位置，確認後點擊合成。
+                </p>
+                <button id="synthesizeBtn" class="btn-success" disabled>
+                    ✨ 合成並下載檔案
+                </button>
+            </div>
+
+        </div>
+
+        <!-- 右側面板：預覽區 -->
+        <div class="panel">
+            <div class="pdf-toolbar">
+                <button id="prevPageBtn" disabled>◀ 上一頁</button>
+                <span id="pageInfo">頁碼: 0 / 0</span>
+                <button id="nextPageBtn" disabled>下一頁 ▶</button>
+            </div>
+            
+            <div class="workspace-wrapper">
+                <div id="pdfWorkspace">
+                    <canvas id="pdfCanvas"></canvas>
+                    <img id="sigLayer" class="draggable-sig" draggable="false" alt="簽名拖曳圖層">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自訂彈出式對話框 (Modal) -->
+    <div id="magicModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999; justify-content:center; align-items:center;">
+        <div style="background:white; padding:30px; border-radius:12px; width:400px; max-width:90%; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+            <h3 style="margin-top:0; color:var(--primary);">✨ 簽署合成完畢！</h3>
+            <p style="color:var(--text-muted); margin-bottom:24px;">您想直接下載這份文件，還是產生 Magic Link 接力連結？</p>
+            
+            <div id="modalButtons" style="display:flex; gap:12px; justify-content:center; flex-direction:column;">
+                <button id="modalDownloadBtn" class="btn-success" style="padding:12px;">⬇️ 直接下載檔案</button>
+                <button id="modalSendBtn" class="btn-primary" style="padding:12px;">🔗 產生接力連結 (7天有效)</button>
+                <button id="modalCancelBtn" class="btn-danger" style="background:#9CA3AF; padding:12px;">關閉</button>
+            </div>
+            
+            <!-- 顯示連結區塊 (預設隱藏) -->
+            <div id="modalLinkArea" style="display:none; margin-top:20px; text-align:left;">
+                <p style="font-size:0.9rem; margin:0 0 8px 0; font-weight:600;">您的專屬接力連結：</p>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="magicLinkInput" readonly style="flex:1; padding:8px; border:1px solid #ccc; border-radius:6px; font-size:0.85rem;">
+                    <button id="copyLinkBtn" class="btn-primary" style="width:auto; padding:8px 12px; font-size:0.9rem;">複製</button>
+                </div>
+                <p id="copyHint" style="color:var(--success); font-size:0.85rem; margin-top:8px; display:none;">✅ 已複製到剪貼簿！</p>
+            </div>
+        </div>
+    </div>
+
+<script type="module">
+// ==========================================
+// 【微軟身分驗證與 Graph API 模組】
+// ==========================================
+const msalConfig = {
+    auth: {
+        clientId: "596b34f8-dc68-4005-94f7-8fccb87699a9",
+        authority: "https://login.microsoftonline.com/b6bf5834-46a6-4a6f-8b95-5787d3a784e3",
+        redirectUri: window.location.origin + window.location.pathname
+    },
+    cache: {
+        cacheLocation: "sessionStorage",
+        storeAuthStateInCookie: false,
+    }
+};
+
+const msalInstance = new window.msal.PublicClientApplication(msalConfig);
+let currentAccount = null;
+
+// 登入邏輯
+window.handleLogin = async function() {
+    try {
+        const loginResponse = await msalInstance.loginPopup({
+            scopes: ["User.Read", "Files.ReadWrite"]
+        });
+        currentAccount = loginResponse.account;
+        msalInstance.setActiveAccount(currentAccount);
+        document.getElementById('loginOverlay').style.display = 'none';
+        document.querySelector('.header').style.display = 'block';
+        document.querySelector('.container').style.display = 'grid'; // 恢復主介面
+        AppOrchestrator.init(); // 登入成功後才初始化應用程式
+    } catch (err) {
+        console.error("登入失敗：", err);
+        alert("登入失敗，請重試！");
+    }
+};
+document.getElementById('msLoginBtn').addEventListener('click', window.handleLogin);
+
+// 取得 Graph API 的 Token
+async function getGraphToken() {
+    if (!currentAccount) throw new Error("未登入");
+    try {
+        const tokenResponse = await msalInstance.acquireTokenSilent({
+            account: currentAccount,
+            scopes: ["Files.ReadWrite"]
+        });
+        return tokenResponse.accessToken;
+    } catch (err) {
+        const tokenResponse = await msalInstance.acquireTokenPopup({
+            scopes: ["Files.ReadWrite"]
+        });
+        return tokenResponse.accessToken;
+    }
+}
+
+// 將網址轉為 Graph API 用的 base64url 格式
+function encodeSharingUrl(url) {
+    const base64 = btoa(url);
+    const unpadded = base64.replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    return 'u!' + unpadded;
+}
+
+function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+async function uploadPdfToCloud(pdfBlob) {
+    try {
+        const accessToken = await getGraphToken();
+        const uuid = generateUUID();
+        
+        // 1. 上傳檔案到個人的 OneDrive 中的 SignedPDFs 資料夾
+        const uploadUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/SignedPDFs/${uuid}.pdf:/content`;
+        const uploadRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/pdf'
+            },
+            body: pdfBlob
+        });
+        if (!uploadRes.ok) throw new Error("上傳至 OneDrive 失敗");
+        const uploadData = await uploadRes.json();
+        const driveItemId = uploadData.id;
+
+        // 2. 針對該檔案產生一個「組織內共用」的連結
+        const linkUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${driveItemId}/createLink`;
+        const linkRes = await fetch(linkUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ type: 'view', scope: 'organization' })
+        });
+        if (!linkRes.ok) throw new Error("產生 OneDrive 共用連結失敗");
+        const linkData = await linkRes.json();
+        
+        // 3. 把產生出來的網頁共用連結，轉換成 Graph API 可辨識的 encoded URL (當作我們的 Token)
+        const encodedUrl = encodeSharingUrl(linkData.link.webUrl);
+        return encodedUrl;
+    } catch (error) {
+        console.error("雲端處理發生錯誤：", error);
+        throw error;
+    }
+}
+
+async function fetchPdfByToken(encodedUrl) {
+    try {
+        const accessToken = await getGraphToken();
+        
+        // 透過 shares API，拿著 encodedUrl 下載該分享檔案的實體內容
+        const downloadUrl = `https://graph.microsoft.com/v1.0/shares/${encodedUrl}/driveItem/content`;
+        const downloadRes = await fetch(downloadUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`
+            },
+            redirect: 'follow'
+        });
+        
+        if (!downloadRes.ok) throw new Error("下載 OneDrive 檔案失敗，可能您無權限或檔案已刪除。");
+        
+        const arrayBuffer = await downloadRes.arrayBuffer();
+        return arrayBuffer;
+    } catch (error) {
+        console.error("讀取雲端文件失敗：", error);
+        throw error;
+    }
+}
+/**
+ * 環境初始化：設定 PDF.js 的 Worker 來源
+ */
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+// ==========================================
+// 【積木 1】檔案處理模組
+// ==========================================
+class FileProcessor {
+    static async readPdfAsArrayBuffer(file) {
+        return new Promise((resolve, reject) => {
+            if (!file || file.type !== "application/pdf") return reject(new Error("檔案格式錯誤"));
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = () => reject(new Error("讀取錯誤"));
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    static downloadFile(data, filename) {
+        const blob = data instanceof Blob ? data : new Blob([data], { type: "application/pdf" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+}
+
+// ==========================================
+// 【積木 2】簽名板模組
+// ==========================================
+class SignaturePad {
+    constructor(canvas) {
+        this.canvas = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.isDrawing = false;
+        this.ctx.lineWidth = 4;
+        this.ctx.lineCap = 'round';
+        this.ctx.lineJoin = 'round';
+        this.ctx.strokeStyle = '#000000';
+        this.hasDrawn = false; // 紀錄是否有畫東西
+        this._bindEvents();
+    }
+
+    _getCoordinates(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        let clientX = e.clientX, clientY = e.clientY;
+        if (e.touches) { clientX = e.touches[0].clientX; clientY = e.touches[0].clientY; }
+        return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+    }
+
+    _start = (e) => {
+        e.preventDefault();
+        this.isDrawing = true;
+        this.hasDrawn = true;
+        const c = this._getCoordinates(e);
+        this.ctx.beginPath();
+        this.ctx.moveTo(c.x, c.y);
+    }
+
+    _draw = (e) => {
+        if (!this.isDrawing) return;
+        e.preventDefault();
+        const c = this._getCoordinates(e);
+        this.ctx.lineTo(c.x, c.y);
+        this.ctx.stroke();
+    }
+
+    _stop = () => {
+        this.isDrawing = false;
+        this.ctx.closePath();
+    }
+
+    _bindEvents() {
+        this.canvas.addEventListener('mousedown', this._start);
+        this.canvas.addEventListener('mousemove', this._draw);
+        window.addEventListener('mouseup', this._stop); // 修正移出範圍問題
+        this.canvas.addEventListener('touchstart', this._start, { passive: false });
+        this.canvas.addEventListener('touchmove', this._draw, { passive: false });
+        window.addEventListener('touchend', this._stop);
+    }
+
+    clear() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.hasDrawn = false;
+    }
+
+    getBase64() {
+        if(!this.hasDrawn) return null;
+        return this.canvas.toDataURL("image/png");
+    }
+}
+
+// ==========================================
+// 【積木 3】PDF 顯示與多頁定位模組
+// ==========================================
+const PdfDisplayModule = {
+    pdfDocument: null,
+    currentPageNum: 1,
+    SCALE: 1.2,
+    
+    // UI Elements
+    canvas: document.getElementById('pdfCanvas'),
+    ctx: document.getElementById('pdfCanvas').getContext('2d'),
+    workspace: document.getElementById('pdfWorkspace'),
+    sigLayer: document.getElementById('sigLayer'),
+    pageInfo: document.getElementById('pageInfo'),
+    prevBtn: document.getElementById('prevPageBtn'),
+    nextBtn: document.getElementById('nextPageBtn'),
+
+    init() {
+        this._bindDragEvents();
+        this.prevBtn.addEventListener('click', () => {
+            if (this.currentPageNum > 1) this.renderPage(--this.currentPageNum);
+        });
+        this.nextBtn.addEventListener('click', () => {
+            if (this.currentPageNum < this.pdfDocument.numPages) this.renderPage(++this.currentPageNum);
+        });
+    },
+
+    async loadPdf(uint8Array) {
+        this.pdfDocument = await pdfjsLib.getDocument(uint8Array).promise;
+        this.currentPageNum = 1;
+        await this.renderPage(this.currentPageNum);
+    },
+
+    async renderPage(num) {
+        const page = await this.pdfDocument.getPage(num);
+        const viewport = page.getViewport({ scale: this.SCALE });
+        this.canvas.height = viewport.height;
+        this.canvas.width = viewport.width;
+
+        await page.render({ canvasContext: this.ctx, viewport: viewport }).promise;
+        
+        this.pageInfo.textContent = `頁碼: ${num} / ${this.pdfDocument.numPages}`;
+        this.prevBtn.disabled = num <= 1;
+        this.nextBtn.disabled = num >= this.pdfDocument.numPages;
+    },
+
+    setSignatureImage(base64) {
+        this.sigLayer.src = base64;
+        this.sigLayer.style.display = 'block';
+        // 重置位置到中間偏上
+        this.sigLayer.style.left = '50px';
+        this.sigLayer.style.top = '50px';
+    },
+
+    getCoordinates() {
+        const scale = this.SCALE; // 取得當時渲染 PDF 的縮放比例
+        return {
+            page: this.currentPageNum,
+            // 必須將網頁上的 DOM 座標除以縮放比例，還原成 PDF 內部的真實點數 (Points) 座標
+            x: (parseInt(window.getComputedStyle(this.sigLayer).left, 10) || 0) / scale,
+            y: (parseInt(window.getComputedStyle(this.sigLayer).top, 10) || 0) / scale,
+            width: this.sigLayer.clientWidth / scale,
+            height: this.sigLayer.clientHeight / scale
+        };
+    },
+
+    // --- 內部拖曳邏輯 ---
+    _bindDragEvents() {
+        let isDragging = false, startX, startY, initL, initT;
+
+        const start = (e) => {
+            isDragging = true;
+            startX = e.touches ? e.touches[0].clientX : e.clientX;
+            startY = e.touches ? e.touches[0].clientY : e.clientY;
+            initL = parseInt(this.sigLayer.style.left) || 0;
+            initT = parseInt(this.sigLayer.style.top) || 0;
+        };
+
+        const move = (e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            let newL = initL + (clientX - startX);
+            let newT = initT + (clientY - startY);
+            
+            // 邊界檢查
+            newL = Math.max(0, Math.min(newL, this.workspace.clientWidth - this.sigLayer.clientWidth));
+            newT = Math.max(0, Math.min(newT, this.workspace.clientHeight - this.sigLayer.clientHeight));
+            
+            this.sigLayer.style.left = `${newL}px`;
+            this.sigLayer.style.top = `${newT}px`;
+        };
+
+        const stop = () => isDragging = false;
+
+        this.sigLayer.addEventListener('mousedown', start);
+        window.addEventListener('mousemove', move);
+        window.addEventListener('mouseup', stop);
+        this.sigLayer.addEventListener('touchstart', start, { passive: false });
+        window.addEventListener('touchmove', move, { passive: false });
+        window.addEventListener('touchend', stop);
+    }
+};
+
+// ==========================================
+// 【積木 4】PDF 合成引擎
+// ==========================================
+async function synthesizePdf(pdfArrayBuffer, signatureBase64, positionData) {
+    const { PDFDocument } = window.PDFLib;
+    const pdfDoc = await PDFDocument.load(pdfArrayBuffer);
+    
+    let signatureImage;
+    if (signatureBase64.startsWith('data:image/jpeg') || signatureBase64.startsWith('data:image/jpg')) {
+        signatureImage = await pdfDoc.embedJpg(signatureBase64);
+    } else {
+        signatureImage = await pdfDoc.embedPng(signatureBase64);
+    }
+    
+    const pageIndex = positionData.page - 1;
+    const pages = pdfDoc.getPages();
+    const page = pages[pageIndex];
+
+    // PDF 座標轉換邏輯：y軸翻轉
+    const pdfY = page.getHeight() - positionData.y - positionData.height;
+
+    page.drawImage(signatureImage, {
+        x: positionData.x,
+        y: pdfY,
+        width: positionData.width,
+        height: positionData.height
+    });
+
+    const pdfBytes = await pdfDoc.save();
+    return new Blob([pdfBytes], { type: 'application/pdf' });
+}
+
+
+// ==========================================
+// 【積木 5】總指揮主程式 (Orchestrator)
+// ==========================================
+const AppOrchestrator = {
+    state: {
+        rawPdfBuffer: null,
+        signatureBase64: null,
+        originalFilename: 'signed_document.pdf'
+    },
+
+    // UI Elements
+    pdfUpload: document.getElementById('pdfUpload'),
+    fileNameDisplay: document.getElementById('fileNameDisplay'),
+    applySigBtn: document.getElementById('applySigBtn'),
+    clearSigBtn: document.getElementById('clearSigBtn'),
+    synthesizeBtn: document.getElementById('synthesizeBtn'),
+    sigCanvas: document.getElementById('signatureCanvas'),
+
+    async init() {
+        this.sigPad = new SignaturePad(this.sigCanvas);
+        PdfDisplayModule.init();
+        this.bindEvents();
+        
+        // 每 300 毫秒檢查一次簽名板是否有畫東西，來啟用套用按鈕
+        setInterval(() => {
+            this.applySigBtn.disabled = !this.sigPad.hasDrawn;
+        }, 300);
+
+        // [新增流程] 檢查網址是否有 Token，自動載入雲端 PDF
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        if (token) {
+            this.fileNameDisplay.textContent = "⏳ 正在從雲端載入接力文件...";
+            this.pdfUpload.disabled = true; // 鎖定上傳
+            try {
+                const arrayBuffer = await fetchPdfByToken(token);
+                this.state.rawPdfBuffer = arrayBuffer;
+                this.state.originalFilename = `(接力簽名)_${token}.pdf`;
+                await PdfDisplayModule.loadPdf(new Uint8Array(arrayBuffer));
+                this.fileNameDisplay.textContent = "✅ 已成功載入雲端文件！請直接簽署。";
+            } catch (err) {
+                alert("載入雲端文件失敗：" + err.message);
+                this.fileNameDisplay.textContent = "❌ 載入雲端文件失敗";
+                this.pdfUpload.disabled = false;
+            }
+        }
+    },
+
+    bindEvents() {
+        // [流程 1] 上傳並交給積木 3 顯示
+        this.pdfUpload.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            this.state.originalFilename = `(已簽名)_${file.name}`;
+            this.fileNameDisplay.textContent = `已載入: ${file.name}`;
+
+            try {
+                // 讀取檔案
+                this.state.rawPdfBuffer = await FileProcessor.readPdfAsArrayBuffer(file);
+                // 轉為 Uint8Array 交給積木 3 渲染
+                await PdfDisplayModule.loadPdf(new Uint8Array(this.state.rawPdfBuffer));
+                
+                // 若此時已有簽名，開啟合成按鈕
+                if(this.state.signatureBase64) this.synthesizeBtn.disabled = false;
+                
+            } catch (err) {
+                alert("上傳失敗：" + err.message);
+            }
+        });
+
+        // [流程 2 & 3] 完成簽名並顯示到積木 3
+        this.applySigBtn.addEventListener('click', () => {
+            const base64 = this.sigPad.getBase64();
+            if (!base64) return alert("請先畫上簽名");
+            
+            this.state.signatureBase64 = base64;
+            
+            // 丟給積木 3 建立拖曳圖層
+            PdfDisplayModule.setSignatureImage(base64);
+
+            // 若此時已有 PDF，開啟合成按鈕
+            if (this.state.rawPdfBuffer) this.synthesizeBtn.disabled = false;
+        });
+
+        // [擴充] 上傳圖章事件
+        const stampUpload = document.getElementById('stampUpload');
+        if (stampUpload) {
+            stampUpload.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const base64 = event.target.result;
+                    this.state.signatureBase64 = base64;
+                    PdfDisplayModule.setSignatureImage(base64);
+                    if (this.state.rawPdfBuffer) this.synthesizeBtn.disabled = false;
+                };
+                reader.readAsDataURL(file); // 讀取為 Base64
+                
+                // 重置 input
+                e.target.value = '';
+            });
+        }
+
+        // 清除簽名
+        this.clearSigBtn.addEventListener('click', () => {
+            this.sigPad.clear();
+            this.state.signatureBase64 = null;
+            PdfDisplayModule.sigLayer.style.display = 'none'; // 隱藏拖曳圖層
+            this.synthesizeBtn.disabled = true;
+        });
+
+        // [流程 4 & 5] 合成與接力 (Magic Link)
+        this.synthesizeBtn.addEventListener('click', async () => {
+            if (!this.state.rawPdfBuffer || !this.state.signatureBase64) return;
+
+            const originalText = this.synthesizeBtn.innerText;
+            this.synthesizeBtn.innerText = "⏳ 合成處理中...";
+            this.synthesizeBtn.disabled = true;
+
+            try {
+                // 1. 先執行積木 4 算出合成後的 PDF
+                const coords = PdfDisplayModule.getCoordinates();
+                const finalBlob = await synthesizePdf(
+                    this.state.rawPdfBuffer, 
+                    this.state.signatureBase64, 
+                    coords
+                );
+
+                // 2. 顯示 Modal 讓使用者選擇接下來的操作
+                const modal = document.getElementById('magicModal');
+                const downloadBtn = document.getElementById('modalDownloadBtn');
+                const sendBtn = document.getElementById('modalSendBtn');
+                const cancelBtn = document.getElementById('modalCancelBtn');
+                
+                modal.style.display = 'flex';
+
+                // -- 選項 A：直接下載 --
+                downloadBtn.onclick = () => {
+                    FileProcessor.downloadFile(finalBlob, this.state.originalFilename);
+                    modal.style.display = 'none';
+                    alert("🎉 合成下載成功！");
+                };
+
+                // -- 選項 B：產生接力連結 --
+                sendBtn.onclick = async () => {
+                    sendBtn.innerText = "⏳ 雲端上傳中...";
+                    sendBtn.disabled = true;
+                    
+                    try {
+                        // 呼叫積木 6 上傳並取得新 Token
+                        const newToken = await uploadPdfToCloud(finalBlob);
+                        
+                        // 組合網址
+                        const magicLink = `${window.location.origin}${window.location.pathname}?token=${newToken}`;
+                        
+                        // 切換 UI，隱藏按鈕，顯示連結區塊
+                        document.getElementById('modalButtons').style.display = 'none';
+                        document.getElementById('modalLinkArea').style.display = 'block';
+                        
+                        const linkInput = document.getElementById('magicLinkInput');
+                        const copyBtn = document.getElementById('copyLinkBtn');
+                        const hint = document.getElementById('copyHint');
+                        
+                        linkInput.value = magicLink;
+                        
+                        // 綁定複製按鈕事件
+                        copyBtn.onclick = () => {
+                            navigator.clipboard.writeText(magicLink).then(() => {
+                                copyBtn.innerText = "已複製";
+                                hint.style.display = 'block';
+                            });
+                        };
+                        
+                    } catch (err) {
+                        alert("雲端同步失敗：" + err.message);
+                        sendBtn.innerText = "🔗 產生接力連結 (7天有效)";
+                        sendBtn.disabled = false;
+                    }
+                };
+
+                // -- 關閉 --
+                cancelBtn.onclick = () => {
+                    modal.style.display = 'none';
+                    // 重置 Modal 狀態
+                    document.getElementById('modalButtons').style.display = 'flex';
+                    document.getElementById('modalLinkArea').style.display = 'none';
+                    sendBtn.innerText = "🔗 產生接力連結 (7天有效)";
+                    sendBtn.disabled = false;
+                };
+
+            } catch(err) {
+                alert("合成失敗發生錯誤：" + err.message);
+            } finally {
+                this.synthesizeBtn.innerText = originalText;
+                this.synthesizeBtn.disabled = false;
+            }
+        });
+    }
+};
+
+// 啟動總指揮！
+window.onload = () => {
+    // 檢查是否有既有的登入 Session
+    const activeAccounts = msalInstance.getAllAccounts();
+    if (activeAccounts.length > 0) {
+        currentAccount = activeAccounts[0];
+        msalInstance.setActiveAccount(currentAccount);
+        document.getElementById('loginOverlay').style.display = 'none';
+        document.querySelector('.header').style.display = 'block';
+        document.querySelector('.container').style.display = 'grid';
+        AppOrchestrator.init();
+    } else {
+        // 如果網址有 token 但沒登入，強制顯示登入畫面，登入後會自動 init 並載入檔案
+        console.log("等待使用者登入...");
+    }
+};
+</script>
+
+</body>
+</html>
