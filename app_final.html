@@ -215,13 +215,22 @@
             background-color: rgba(255, 255, 255, 0.4);
             border-radius: 4px;
             width: 150px;
-            height: 80px;
-            /* 允許調整大小 */
-            resize: both;
-            overflow: hidden;
+            height: auto;
             min-width: 50px;
-            min-height: 50px;
             max-width: 100%;
+        }
+        
+        /* 自訂等比例縮放控制角 */
+        .sig-resize-handle {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 20px;
+            height: 20px;
+            cursor: nwse-resize;
+            background-color: var(--primary);
+            clip-path: polygon(100% 0, 100% 100%, 0 100%);
+            z-index: 10;
         }
         .draggable-sig:active { cursor: grabbing; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.2); transform: scale(1.02); }
 
@@ -327,7 +336,8 @@
                 <div id="pdfWorkspace">
                     <canvas id="pdfCanvas"></canvas>
                     <div id="sigLayer" class="draggable-sig">
-                        <img id="sigImage" draggable="false" alt="簽名拖曳圖層" style="width:100%; height:100%; object-fit:contain; pointer-events:none;">
+                        <img id="sigImage" draggable="false" alt="簽名拖曳圖層" style="width:100%; height:auto; display:block; pointer-events:none;">
+                        <div id="sigResizeHandle" class="sig-resize-handle"></div>
                     </div>
                 </div>
             </div>
@@ -758,6 +768,35 @@ const PdfDisplayModule = {
         this.sigLayer.addEventListener('touchstart', start, { passive: false });
         window.addEventListener('touchmove', move, { passive: false });
         window.addEventListener('touchend', stop);
+
+        // --- 自訂等比例縮放邏輯 ---
+        const resizeHandle = document.getElementById('sigResizeHandle');
+        let isResizing = false, startResizeX, startResizeW;
+
+        const startResize = (e) => {
+            isResizing = true;
+            startResizeX = e.touches ? e.touches[0].clientX : e.clientX;
+            startResizeW = this.sigLayer.clientWidth;
+            e.stopPropagation(); // 阻止事件冒泡，避免觸發拖曳
+        };
+
+        const moveResize = (e) => {
+            if (!isResizing) return;
+            e.preventDefault();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const newW = startResizeW + (clientX - startResizeX);
+            // 動態更新寬度，高度會因為 img 的 height:auto 自動等比例縮放
+            this.sigLayer.style.width = `${Math.max(50, newW)}px`;
+        };
+
+        const stopResize = () => isResizing = false;
+
+        resizeHandle.addEventListener('mousedown', startResize);
+        window.addEventListener('mousemove', moveResize);
+        window.addEventListener('mouseup', stopResize);
+        resizeHandle.addEventListener('touchstart', startResize, { passive: false });
+        window.addEventListener('touchmove', moveResize, { passive: false });
+        window.addEventListener('touchend', stopResize);
     }
 };
 
