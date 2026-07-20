@@ -202,21 +202,27 @@
 
         canvas#pdfCanvas { display: block; }
 
-        /* 拖曳中的簽名圖層 */
         .draggable-sig {
             position: absolute;
             top: 50px;
             left: 50px;
             cursor: grab;
-            border: 2px solid var(--primary);
+            border: 2px dashed var(--primary);
             box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
             user-select: none;
             display: none;
             touch-action: none;
-            background-color: rgba(255, 255, 255, 0.2);
+            background-color: rgba(255, 255, 255, 0.4);
             border-radius: 4px;
-            width: 150px; /* 固定預設大小，可依需求調整 */
+            width: 150px;
+            height: auto;
             object-fit: contain;
+            /* 允許調整大小 */
+            resize: both;
+            overflow: hidden;
+            min-width: 50px;
+            min-height: 50px;
+            max-width: 100%;
         }
         .draggable-sig:active { cursor: grabbing; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.2); transform: scale(1.02); }
 
@@ -329,7 +335,11 @@
 
     <!-- 自訂彈出式對話框 (Modal) -->
     <div id="magicModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999; justify-content:center; align-items:center;">
-        <div style="background:white; padding:30px; border-radius:12px; width:400px; max-width:90%; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+        <div style="position:relative; background:white; padding:30px; border-radius:12px; width:400px; max-width:90%; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+            
+            <!-- 右上角關閉按鈕 (打叉叉) -->
+            <button id="modalCloseXBtn" style="position:absolute; top:12px; right:12px; background:none; border:none; font-size:1.5rem; cursor:pointer; color:#9CA3AF; line-height:1; padding:0; width:30px; height:30px; border-radius:50%;">&times;</button>
+
             <h3 style="margin-top:0; color:var(--primary);">✨ 簽署合成完畢！</h3>
             <p style="color:var(--text-muted); margin-bottom:24px;">您想直接下載這份文件，還是產生 Magic Link 接力連結？</p>
             
@@ -992,8 +1002,8 @@ const AppOrchestrator = {
                     }
                 };
 
-                // -- 關閉 --
-                cancelBtn.onclick = () => {
+                // -- 關閉 (套用到底部按鈕與右上角叉叉) --
+                const closeModalLogic = () => {
                     modal.style.display = 'none';
                     // 重置 Modal 狀態
                     document.getElementById('modalButtons').style.display = 'flex';
@@ -1007,6 +1017,9 @@ const AppOrchestrator = {
                         sendEmailBtn.disabled = false;
                     }
                 };
+                
+                cancelBtn.onclick = closeModalLogic;
+                document.getElementById('modalCloseXBtn').onclick = closeModalLogic;
 
             } catch(err) {
                 alert("合成失敗發生錯誤：" + err.message);
