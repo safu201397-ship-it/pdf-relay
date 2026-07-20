@@ -347,6 +347,13 @@
                     <button id="copyLinkBtn" class="btn-primary" style="width:auto; padding:8px 12px; font-size:0.9rem;">複製</button>
                 </div>
                 <p id="copyHint" style="color:var(--success); font-size:0.85rem; margin-top:8px; display:none;">✅ 已複製到剪貼簿！</p>
+                
+                <hr style="border:0; border-top:1px solid #eee; margin: 20px 0;">
+                
+                <p style="font-size:0.95rem; margin:0 0 10px 0; font-weight:600; color:var(--primary);">📨 寄送通知給下一位簽署者</p>
+                <input type="email" id="emailToInput" placeholder="輸入對方 Email" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; font-size:0.85rem; margin-bottom:10px; box-sizing: border-box;">
+                <textarea id="emailMessageInput" placeholder="想對他說的話... (選填)" rows="3" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:6px; font-size:0.85rem; margin-bottom:10px; resize:none; box-sizing: border-box;"></textarea>
+                <button id="sendEmailBtn" class="btn-primary" style="width:100%; padding:10px; font-size:1rem; background-color:#10B981; border:none;">🚀 寄送 Email 通知</button>
             </div>
         </div>
     </div>
@@ -374,7 +381,7 @@ let currentAccount = null;
 window.handleLogin = async function() {
     try {
         const loginResponse = await msalInstance.loginPopup({
-            scopes: ["User.Read", "Files.ReadWrite"]
+            scopes: ["User.Read", "Files.ReadWrite", "Mail.Send"]
         });
         currentAccount = loginResponse.account;
         msalInstance.setActiveAccount(currentAccount);
@@ -395,12 +402,12 @@ async function getGraphToken() {
     try {
         const tokenResponse = await msalInstance.acquireTokenSilent({
             account: currentAccount,
-            scopes: ["Files.ReadWrite"]
+            scopes: ["Files.ReadWrite", "Mail.Send"]
         });
         return tokenResponse.accessToken;
     } catch (err) {
         const tokenResponse = await msalInstance.acquireTokenPopup({
-            scopes: ["Files.ReadWrite"]
+            scopes: ["Files.ReadWrite", "Mail.Send"]
         });
         return tokenResponse.accessToken;
     }
@@ -411,6 +418,52 @@ function encodeSharingUrl(url) {
     const base64 = btoa(url);
     const unpadded = base64.replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
     return 'u!' + unpadded;
+}
+
+// 透過 Graph API 寄送信件
+async function sendEmailViaGraph(toEmail, subject, contentUrl, customMessage) {
+    try {
+        const accessToken = await getGraphToken();
+        const mail = {
+            message: {
+                subject: subject,
+                body: {
+                    contentType: "HTML",
+                    content: `
+                        <div style="font-family: Arial, sans-serif; padding: 20px; background-color: #f9fafb; border-radius: 8px; max-width: 600px; margin: 0 auto; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+                            <h2 style="color: #4F46E5; margin-top: 0;">您有一份新的 PDF 文件需要簽署</h2>
+                            <p style="color: #374151; font-size: 16px; line-height: 1.5;">${customMessage.replace(/\n/g, '<br>')}</p>
+                            <hr style="border: 0; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+                            <p style="color: #374151; font-size: 16px; margin-bottom: 20px;">請點擊下方按鈕前往系統，完成您的專屬電子簽章：</p>
+                            <a href="${contentUrl}" style="display: inline-block; padding: 12px 24px; background-color: #4F46E5; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 16px;">前往簽署</a>
+                            <p style="color: #9CA3AF; font-size: 12px; margin-top: 25px;">※ 此信件由 PDF 電子簽章工具自動發出，請勿直接回覆。</p>
+                        </div>
+                    `
+                },
+                toRecipients: [
+                    { emailAddress: { address: toEmail } }
+                ]
+            },
+            saveToSentItems: "true"
+        };
+
+        const res = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${accessToken}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(mail)
+        });
+
+        if (!res.ok) {
+            const errorData = await res.json();
+            throw new Error(errorData.error?.message || "寄信失敗");
+        }
+    } catch (error) {
+        console.error("Graph API 寄信發生錯誤：", error);
+        throw error;
+    }
 }
 
 function generateUUID() {
@@ -898,6 +951,32 @@ const AppOrchestrator = {
                             });
                         };
                         
+                        // 綁定寄信按鈕事件
+                        const sendEmailBtn = document.getElementById('sendEmailBtn');
+                        sendEmailBtn.onclick = async () => {
+                            const toEmail = document.getElementById('emailToInput').value.trim();
+                            const message = document.getElementById('emailMessageInput').value.trim() || "這是一份需要您處理的 PDF，請抽空幫我簽署，謝謝！";
+                            
+                            if (!toEmail) return alert("請輸入對方的 Email！");
+                            if (!toEmail.includes('@')) return alert("請輸入正確的 Email 格式！");
+                            
+                            const originalEmailText = sendEmailBtn.innerText;
+                            sendEmailBtn.innerText = "⏳ 寄信中...";
+                            sendEmailBtn.disabled = true;
+                            
+                            try {
+                                await sendEmailViaGraph(toEmail, "【需要簽署】您有一份新的 PDF 文件", magicLink, message);
+                                alert("✅ 寄信成功！信件已發送至對方信箱。");
+                                sendEmailBtn.innerText = "✅ 已成功寄出";
+                                document.getElementById('emailToInput').value = '';
+                                document.getElementById('emailMessageInput').value = '';
+                            } catch (err) {
+                                alert("寄信失敗：" + err.message);
+                                sendEmailBtn.innerText = originalEmailText;
+                                sendEmailBtn.disabled = false;
+                            }
+                        };
+                        
                     } catch (err) {
                         alert("雲端同步失敗：" + err.message);
                         sendBtn.innerText = "🔗 產生接力連結 (7天有效)";
@@ -913,6 +992,12 @@ const AppOrchestrator = {
                     document.getElementById('modalLinkArea').style.display = 'none';
                     sendBtn.innerText = "🔗 產生接力連結 (7天有效)";
                     sendBtn.disabled = false;
+                    
+                    const sendEmailBtn = document.getElementById('sendEmailBtn');
+                    if(sendEmailBtn) {
+                        sendEmailBtn.innerText = "🚀 寄送 Email 通知";
+                        sendEmailBtn.disabled = false;
+                    }
                 };
 
             } catch(err) {
