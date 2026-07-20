@@ -518,17 +518,25 @@ async function fetchPdfByToken(encodedUrl) {
     try {
         const accessToken = await getGraphToken();
         
-        // 透過 shares API，拿著 encodedUrl 下載該分享檔案的實體內容
-        const downloadUrl = `https://graph.microsoft.com/v1.0/shares/${encodedUrl}/driveItem/content`;
-        const downloadRes = await fetch(downloadUrl, {
+        // 1. 先取得該分享連結的檔案中繼資料 (不直接加 /content 避免 Fetch 自動跟隨 Redirect 導致 CORS 錯誤)
+        const itemUrl = `https://graph.microsoft.com/v1.0/shares/${encodedUrl}/driveItem`;
+        const itemRes = await fetch(itemUrl, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`
-            },
-            redirect: 'follow'
+            }
         });
         
-        if (!downloadRes.ok) throw new Error("下載 OneDrive 檔案失敗，可能您無權限或檔案已刪除。");
+        if (!itemRes.ok) throw new Error("取得 OneDrive 檔案資訊失敗，可能您無權限或檔案已刪除。");
+        const itemData = await itemRes.json();
+        
+        // 2. 取得微軟預先授權的直接下載網址
+        const downloadUrl = itemData['@microsoft.graph.downloadUrl'];
+        if (!downloadUrl) throw new Error("無法取得檔案下載連結");
+        
+        // 3. 直接下載檔案實體 (不帶 Authorization 標頭，因為下載網址本身已包含授權 Token)
+        const downloadRes = await fetch(downloadUrl);
+        if (!downloadRes.ok) throw new Error("下載 PDF 實體檔案失敗。");
         
         const arrayBuffer = await downloadRes.arrayBuffer();
         return arrayBuffer;
