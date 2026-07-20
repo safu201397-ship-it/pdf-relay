@@ -215,8 +215,7 @@
             background-color: rgba(255, 255, 255, 0.4);
             border-radius: 4px;
             width: 150px;
-            height: auto;
-            object-fit: contain;
+            height: 80px;
             /* 允許調整大小 */
             resize: both;
             overflow: hidden;
@@ -327,7 +326,9 @@
             <div class="workspace-wrapper">
                 <div id="pdfWorkspace">
                     <canvas id="pdfCanvas"></canvas>
-                    <img id="sigLayer" class="draggable-sig" draggable="false" alt="簽名拖曳圖層">
+                    <div id="sigLayer" class="draggable-sig">
+                        <img id="sigImage" draggable="false" alt="簽名拖曳圖層" style="width:100%; height:100%; object-fit:contain; pointer-events:none;">
+                    </div>
                 </div>
             </div>
         </div>
@@ -702,7 +703,7 @@ const PdfDisplayModule = {
     },
 
     setSignatureImage(base64) {
-        this.sigLayer.src = base64;
+        document.getElementById('sigImage').src = base64;
         this.sigLayer.style.display = 'block';
         // 重置位置到中間偏上
         this.sigLayer.style.left = '50px';
